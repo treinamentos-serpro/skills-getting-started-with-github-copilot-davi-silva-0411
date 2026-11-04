@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 
 import pytest
@@ -142,3 +143,44 @@ def test_unregister_returns_not_found_for_unknown_activity(client, isolated_acti
     # Assert
     assert response.status_code == 404
     assert response.json() == {"detail": "Activity not found"}
+
+def test_concurrent_duplicate_signups_register_student_once(client, isolated_activities):
+    # Arrange
+    email = "student@mergington.edu"
+    attempts = 20
+
+    # Act
+    with ThreadPoolExecutor(max_workers=attempts) as executor:
+        responses = list(executor.map(
+            lambda _: client.post(
+                "/activities/Basketball Team/signup",
+                params={"email": email},
+            ),
+            range(attempts),
+        ))
+
+    # Assert
+    status_codes = sorted(response.status_code for response in responses)
+    assert status_codes == [200] + [400] * (attempts - 1)
+    assert isolated_activities["Basketball Team"]["participants"].count(email) == 1
+
+
+def test_concurrent_unregisters_return_not_found_instead_of_error(client, isolated_activities):
+    # Arrange
+    email = "michael@mergington.edu"
+    attempts = 20
+
+    # Act
+    with ThreadPoolExecutor(max_workers=attempts) as executor:
+        responses = list(executor.map(
+            lambda _: client.delete(
+                "/activities/Chess Club/unregister",
+                params={"email": email},
+            ),
+            range(attempts),
+        ))
+
+    # Assert
+    status_codes = sorted(response.status_code for response in responses)
+    assert status_codes == [200] + [404] * (attempts - 1)
+    assert email not in isolated_activities["Chess Club"]["participants"]
